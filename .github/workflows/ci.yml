@@ -1,0 +1,23 @@
+# CI · run every suite. No dependencies, no install step — that is the point of the repository, and
+# a workflow that needed one would be the first evidence the promise had been broken.
+name: "CI · tests"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # dependencies.test.mjs runs as part of this: the family's membership test is a suite, not a
+      # review checklist. If a production module ever acquires an import, this is what says so.
+      - run: node test.mjs
