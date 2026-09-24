@@ -90,23 +90,56 @@ function urlOf(out) {
 //
 // Matching is Jekyll's. `scope.path` is "" (everything) or a path prefix; the page's OWN front
 // matter always wins; a more specific scope (longer path) beats a less specific one, and ties go
-// to the later entry, the way a later key wins in a merge. `scope.type` is honoured as far as
-// this builder has types: everything here is a page, so a scope naming any other collection
-// simply does not apply.
-function defaultsFor(srcPath, defaults) {
+// to the later entry, the way a later key wins in a merge. `scope.type` names what a file is:
+// "pages", or a collection's name for its documents. A scope with no type applies to both.
+function defaultsFor(srcPath, defaults, kind = "pages") {
   if (!Array.isArray(defaults)) return {};
   const matched = [];
   defaults.forEach((entry, index) => {
     const scope = (entry && entry.scope) || {};
     const type = scope.type;
-    if (type !== undefined && type !== null && type !== "" && type !== "pages") return;
+    if (type !== undefined && type !== null && type !== "" && type !== kind) return;
     const prefix = String(scope.path ?? "");
     const dir = prefix.replace(/\/+$/, "");
     if (prefix !== "" && srcPath !== dir && !srcPath.startsWith(dir + "/")) return;
-    matched.push({ depth: dir.length, index, values: (entry && entry.values) || {} });
+    // Jekyll's precedence: a longer path wins; at equal paths a scope that names a type beats one
+    // that does not (so `type: podcasts` beats the site-wide `path: ""` default); then later wins.
+    const typed = type !== undefined && type !== null && type !== "" ? 1 : 0;
+    matched.push({ depth: dir.length, typed, index, values: (entry && entry.values) || {} });
   });
-  matched.sort((a, b) => (a.depth - b.depth) || (a.index - b.index));
+  matched.sort((a, b) => (a.depth - b.depth) || (a.typed - b.typed) || (a.index - b.index));
   return Object.assign({}, ...matched.map((m) => m.values));
+}
+
+// COLLECTIONS: Jekyll's `collections:` config. A collection `podcasts` is the directory `_podcasts/`;
+// each file in it WITH front matter is a document. Every document is listed in `site.podcasts`
+// (front matter + url + path + collection), whether or not it is rendered; with `output: true` it is
+// also rendered, at the collection's `permalink`. Front-matter-less files there are copied verbatim
+// only when the collection outputs, which is Jekyll's rule too.
+//
+// Permalink placeholders: :collection, :name (the file's basename), :path (its path inside the
+// collection, no extension), :title (front matter `slug`, else the basename) and :output_ext. The
+// default is /:collection/:path/ - Jekyll's own default for a collection is /:collection/:path:output_ext;
+// the pretty form is what a site with `permalink: pretty` gets, and every civic site measured is one.
+//
+// Order is Jekyll's for non-post collections: by `date` when documents carry one, then by path.
+function collectionsOf(config) {
+  const c = config.collections;
+  if (!c || typeof c !== "object") return [];
+  if (Array.isArray(c)) return c.map((name) => ({ name: String(name), output: false, permalink: null }));
+  return Object.entries(c).map(([name, v]) => ({
+    name, output: !!(v && v.output), permalink: (v && v.permalink) || null,
+  }));
+}
+
+function documentOutPath(col, rel, data) {
+  const inner = rel.replace(/\.(md|markdown|html)$/, "");
+  const name = inner.split("/").pop();
+  const pattern = data.permalink || col.permalink || "/:collection/:path/";
+  const url = pattern
+    .replace(/:collection/g, col.name).replace(/:path/g, inner).replace(/:name/g, name)
+    .replace(/:title/g, String(data.slug ?? name)).replace(/:output_ext/g, ".html");
+  return outputPath(inner + ".html", { ...data, permalink: url }, false);
 }
 
 // Render one page body through the template seam (+ doc-render for .md) then wrap it up its layout chain.
@@ -175,9 +208,28 @@ export function buildSite(tree, {
 
   // pass 1: classify every path into a page (front-matter fence) or a static file, and compute each
   // page's output path + url BEFORE rendering, so site.pages is fully populated when any page renders.
-  const pages = [], statics = [];
+  const pages = [], statics = [], staticOut = {};
+  const collections = collectionsOf(config);
+  const docsByCollection = Object.fromEntries(collections.map((c) => [c.name, []]));
   for (const path of Object.keys(tree)) {
     if (SPECIAL.some((s) => path.startsWith(s))) continue;
+    const col = collections.find((c) => path.startsWith("_" + c.name + "/"));
+    if (col) {
+      const rel = path.slice(col.name.length + 2);
+      if (isPage(path) && FM_RE.test(tree[path])) {
+        const { fmText, body } = splitFront(tree[path]);
+        const front = fmText ? (parseYaml(fmText) || {}) : {};
+        const data = { ...defaultsFor(path, config.defaults, col.name), ...front };
+        const out = documentOutPath(col, rel, data);
+        const doc = { path, data, body, isMd: /\.(md|markdown)$/.test(path), out, url: urlOf(out), collection: col.name };
+        docsByCollection[col.name].push(doc);
+        if (col.output) pages.push(doc);
+      } else if (col.output) {
+        statics.push(path);
+        staticOut[path] = col.name + "/" + rel;              // Jekyll: /:collection/:path, no underscore
+      }
+      continue;
+    }
     // The site's own config is an INPUT. Real Jekyll never publishes it, and nothing downstream reads
     // it out of a built site - the offline reader renders from the CHECKOUT, where the config is still
     // right there. Copying it into the artifact only risks publishing whatever a site keeps in it.
@@ -197,14 +249,22 @@ export function buildSite(tree, {
 
   // the Jekyll page/site model: site.pages carries a stub per page (its front matter + url + path), so a
   // real-Jekyll template that iterates site.pages for nav runs through this builder unchanged.
-  site.pages = pages.map((e) => ({ ...e.data, url: e.url, path: e.path }));
+  site.pages = pages.filter((e) => !e.collection).map((e) => ({ ...e.data, url: e.url, path: e.path }));
+  for (const [name, docs] of Object.entries(docsByCollection)) {
+    docs.sort((a, b) => {
+      const x = a.data.date == null ? "" : String(a.data.date), y = b.data.date == null ? "" : String(b.data.date);
+      return x === y ? (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) : (x < y ? -1 : 1);
+    });
+    site[name] = docs.map((e) => ({ ...e.data, url: e.url, path: e.path, collection: name }));
+  }
 
   const out = {};
   for (const e of pages) {
     const page = { ...e.data, url: e.url, path: e.path, name: e.path.split("/").pop(), dir: urlOf(e.out).replace(/[^/]*$/, "") };
+    if (e.collection) page.collection = e.collection;
     const ctx = { site, page, content: "" };
     out["_site/" + e.out] = renderPage(e.path, e.body, e.isMd, ctx, tree, plugs, tpl);
   }
-  for (const p of statics) out["_site/" + p] = tree[p];
+  for (const p of statics) out["_site/" + (staticOut[p] ?? p)] = tree[p];
   return out;
 }

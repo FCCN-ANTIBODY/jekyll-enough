@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { render, evalCond } from "./liquid.mjs";
+import { render, evalCond, FILTERS } from "./liquid.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = (n) => readFileSync(join(HERE, "fixtures", n), "utf8");
@@ -194,6 +194,32 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); fails++; } else co
   ok(gaps.length === 2 && gaps[1] === "filter rouge", "gaps are collected by name (the compatibility report)");
   const noLoader = render("x{% include a.html %}y", {}, { lenient: true, gaps: [] });
   ok(noLoader === "x<!-- liquid-enough gap: include -->y", "lenient: a missing include loader is a gap, not a crash");
+}
+
+// The filters fcpublicmedia.org's whole-site build named as gaps (2026-09-24), each against Liquid's
+// or Jekyll's own documented behaviour.
+{
+  ok(render("[{{ '  a b  ' | strip }}]") === "[a b]", "strip trims both ends");
+  ok(render("{{ x | strip_newlines }}", { x: "a\nb\r\nc" }) === "abc", "strip_newlines drops \\n and \\r\\n");
+  ok(render("{{ 'a-b-c' | remove: '-' }}") === "abc", "remove drops every occurrence");
+  ok(render("{{ x | escape }}", { x: `<a href="q">'&'</a>` }) === "&lt;a href=&quot;q&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;", "escape covers & < > \" '");
+  ok(render("{{ 'Liquid' | slice: 0 }}") === "L", "slice defaults to one character");
+  ok(render("{{ 'Liquid' | slice: 2, 5 }}") === "quid", "slice with a length");
+  ok(render("{{ 'Liquid' | slice: -3, 2 }}") === "ui", "slice counts a negative offset from the end");
+  ok(render("{{ x | concat: y | join: ',' }}", { x: [1, 2], y: [3] }) === "1,2,3", "concat joins arrays");
+  ok(render("{{ '' | split: ',' | size }}") === "0", "split: an empty string is an empty array (Ruby), not [\"\"] (JS)");
+  ok(render("{{ 'a,b,,' | split: ',' | size }}") === "2", "split: trailing empty fields are dropped, as in Ruby");
+  ok(render("{% assign l = '' | split: ',' %}{% for i in xs %}{% assign l = l | push: i %}{% endfor %}{{ l | join: ',' }}",
+    { xs: [1, 2, 3] }) === "1,2,3", "push builds a list across a loop");
+  {
+    const src = [1]; FILTERS.push(src, [2]);
+    ok(src.length === 1, "push does not mutate its input");
+  }
+  ok(render("{{ 3 | times: 4 }}") === "12", "times multiplies");
+  ok(render("{{ 2.6 | round }}") === "3" && render("{{ 3.14159 | round: 2 }}") === "3.14", "round, with and without digits");
+  const g = FILTERS.group_by([{ k: "a" }, { k: "b" }, { k: "a" }, {}], ["k"]);
+  ok(JSON.stringify(g.map((x) => [x.name, x.size])) === '[["a",2],["b",1],["",1]]',
+    "group_by keeps first-seen order, counts, and files a missing key under \"\"");
 }
 
 if (fails) { console.error(`\n${fails} FAILED`); process.exit(1); }
