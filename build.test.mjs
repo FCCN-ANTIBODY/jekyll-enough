@@ -246,5 +246,50 @@ const site = buildSite(tree);
   ok(!("_site/.git/HEAD" in s2), "everything else hidden stays hidden");
 }
 
+// COLLECTIONS, in the shape fcpublicmedia.org uses them: two output collections with pretty
+// permalinks, type-scoped defaults under a site-wide `path: ""` default, and an index that lists one.
+{
+  const t = {
+    "_config.yml": [
+      "permalink: pretty",
+      "collections:",
+      "  podcasts:",
+      "    output: true",
+      "    permalink: /podcasts/:name/",
+      "  drafts_kept:",
+      "    output: false",
+      "defaults:",
+      "  - scope:",
+      "      path: \"\"",
+      "      type: podcasts",
+      "    values:",
+      "      layout: podcast",
+      "  - scope:",
+      "      path: \"\"",
+      "    values:",
+      "      layout: page",
+    ].join("\n"),
+    "_layouts/page.html": "<main>{{ content }}</main>",
+    "_layouts/podcast.html": "<article data-c=\"{{ page.collection }}\">{{ content }}</article>",
+    "_podcasts/zeta.md": "---\ntitle: Zeta\n---\nZ",
+    "_podcasts/alpha.md": "---\ntitle: Alpha\n---\nA",
+    "_podcasts/cover.txt": "static in an output collection",
+    "_drafts_kept/secret.md": "---\ntitle: Kept\n---\nnot rendered",
+    "podcasts.md": "---\ntitle: Podcasts\n---\n{% for p in site.podcasts %}[{{ p.title }} {{ p.url }}]{% endfor %}",
+  };
+  const s = buildSite(t);
+  ok(/^<article data-c="podcasts">[\s\S]*A/.test(s["_site/podcasts/alpha/index.html"] || ""),
+     "a document renders at its collection permalink, with its type-scoped layout and page.collection");
+  ok(!Object.keys(s).some((k) => k.startsWith("_site/_podcasts/")), "a collection's source directory is not published as pages");
+  ok(/\[Alpha \/podcasts\/alpha\/\]\[Zeta \/podcasts\/zeta\/\]/.test(s["_site/podcasts/index.html"] || ""),
+     "site.podcasts lists every document, in path order, with its url");
+  ok(/^<main>/.test(s["_site/podcasts/index.html"] || ""), "an ordinary page keeps the site-wide default layout");
+  ok(s["_site/podcasts/cover.txt"] === "static in an output collection",
+     "a front-matter-less file in an output collection is copied under the collection's name");
+  ok(!Object.keys(s).some((k) => k.includes("secret")), "an output: false collection renders nothing");
+  const s2 = buildSite({ ...t, "podcasts.md": "---\ntitle: Count\n---\n{{ site.drafts_kept.size }}" });
+  ok(/1/.test(s2["_site/podcasts/index.html"] || ""), "an output: false collection is still listed in site.<name>");
+}
+
 if (fails) { console.error(`\n${fails} FAILED`); process.exit(1); }
 console.log("\nall jekyll-enough build tests passed");

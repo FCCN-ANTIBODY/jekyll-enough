@@ -288,7 +288,15 @@ const FILTERS = {
   first: (v) => Array.isArray(v) ? v[0] : (v == null ? null : String(v)[0]),
   last: (v) => Array.isArray(v) ? v[v.length - 1] : null,
   join: (v, [sep]) => Array.isArray(v) ? v.join(sep ?? " ") : v,
-  split: (v, [sep]) => v == null ? [] : String(v).split(sep ?? " "),
+  // Ruby's String#split, not JS's: "" splits to [] (JS gives [""]), and trailing empty fields are
+  // dropped. That first difference is load-bearing - `'' | split: ','` is Liquid's idiom for an
+  // empty array, and every list built from it with `push` otherwise starts with a stray "".
+  split: (v, [sep]) => {
+    if (v == null) return [];
+    const parts = String(v).split(sep ?? " ");
+    while (parts.length && parts[parts.length - 1] === "") parts.pop();
+    return parts;
+  },
   append: (v, [s]) => String(v ?? "") + String(s ?? ""),
   replace: (v, [a, b]) => String(v ?? "").split(String(a)).join(String(b ?? "")),
   map: (v, [k]) => Array.isArray(v) ? v.map((o) => (o == null || o[k] === undefined) ? null : o[k]) : [],
@@ -306,6 +314,39 @@ const FILTERS = {
     .replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, ""),
   number_of_words: (v) => { const s = String(v ?? "").trim(); return s ? s.split(/\s+/).length : 0; },
   slugify: (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
+  // Standard Liquid, added when fcpublicmedia.org's whole site was built here and these were the named
+  // gaps (2026-09-24). Semantics are Liquid's/Jekyll's; where JS and Ruby differ it is said beside it.
+  strip: (v) => String(v ?? "").trim(),
+  strip_newlines: (v) => String(v ?? "").replace(/\r?\n/g, ""),
+  remove: (v, [s]) => String(v ?? "").split(String(s ?? "")).join(""),
+  escape: (v) => v == null ? v : String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
+  // slice: offset (negative counts from the end), length defaulting to 1 - on strings and arrays.
+  slice: (v, [start, len]) => {
+    if (v == null) return v;
+    const s = Number(start), n = len === undefined ? 1 : Number(len);
+    const from = s < 0 ? Math.max(v.length + s, 0) : s;
+    return Array.isArray(v) ? v.slice(from, from + n) : String(v).slice(from, from + n);
+  },
+  concat: (v, [more]) => [...(Array.isArray(v) ? v : []), ...(Array.isArray(more) ? more : [])],
+  // push is Jekyll's, not Liquid's: a NEW array with the item on the end. The input is not mutated,
+  // which is what makes `{% assign list = list | push: x %}` safe inside a loop.
+  push: (v, [item]) => [...(Array.isArray(v) ? v : []), item],
+  times: (v, [n]) => Number(v) * Number(n),
+  // round: Ruby rounds half away from zero; Math.round rounds half up. They differ only on negative
+  // halves (-2.5), which no civic template has been seen to produce.
+  round: (v, [digits]) => { const x = Number(v), d = Number(digits ?? 0); return d > 0 ? Number(x.toFixed(d)) : Math.round(x); },
+  // group_by is Jekyll's: [{ name, items, size }] in first-seen order, the key stringified (nil -> "").
+  group_by: (v, [k]) => {
+    if (!Array.isArray(v)) return [];
+    const groups = new Map();
+    for (const item of v) {
+      const key = item == null || item[k] == null ? "" : String(item[k]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    return [...groups].map(([name, items]) => ({ name, items, size: items.length }));
+  },
   date: (v, [fmt]) => { const d = toDate(v); return d ? strftime(d, fmt ?? "%Y-%m-%d") : v; },
   date_to_xmlschema: (v) => {
     const d = toDate(v); if (!d) return v;
