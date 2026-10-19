@@ -81,5 +81,31 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); fails++; } else co
   }
 }
 
+// 5. lists, quotes, tables, rules, images, footnotes - the letter blocks. These were the press's
+//    markdown-more pre-pass; they live here now, so there is one renderer.
+{
+  ok(md("- one\n- two **bold**\n") === "<ul><li>one</li><li>two <strong>bold</strong></li></ul>", "a bullet list");
+  ok(md("1. first\n2. second\n") === "<ol><li>first</li><li>second</li></ol>", "a numbered list");
+  ok(md("- a\n  - a1\n  - a2\n- b\n") === "<ul><li>a<ul><li>a1</li><li>a2</li></ul></li><li>b</li></ul>", "nesting by indent");
+  ok(md("- a long item\n  that wraps\n- b\n") === "<ul><li>a long item that wraps</li><li>b</li></ul>", "a wrapped item folds into itself");
+  ok(md("> quoted **words**\n> more\n") === "<blockquote><p>quoted <strong>words</strong>\nmore</p></blockquote>", "a blockquote renders its inside");
+  ok(md("> - in a quote\n> - a list\n").includes("<blockquote><ul><li>in a quote</li>"), "a list inside a blockquote");
+  const t = md("| a | b |\n| --- | --- |\n| `x` | [y](y.md) |\n");
+  ok(t.startsWith("<table><thead><tr><th>a</th><th>b</th></tr></thead>") && t.includes("<td><code>x</code></td><td><a href=\"y.md\">y</a></td>"), "a pipe table with inline cells");
+  ok(md("before\n\n---\n\nafter") === "<p>before</p>\n<hr>\n<p>after</p>", "a rule");
+  ok(md("![a diagram](d.png)") === '<p><img src="d.png" alt="a diagram"></p>', "an image is an image");
+  const src = "```\n- not a list\n> not a quote\n| not | a table |\n```";
+  ok(md(src).includes("- not a list") && md(src).includes("&gt; not a quote"), "fenced code is escaped, never read as blocks");
+  ok(md("**bold start** of a paragraph\n") === "<p><strong>bold start</strong> of a paragraph</p>", "a paragraph opening with ** is not a list");
+  ok(md("***\n") === "<hr>", "*** is a rule, not a bullet");
+  // footnotes, kramdown's shape: a superscript reference, the notes gathered at the end, a way back.
+  const fn = md("A claim.[^5] Another.[^note]\n\n[^5]: The Sun, [story](https://s)\n[^note]: Second note\n  that wraps.\n");
+  ok(fn.includes('<sup class="footnote"><a href="#fn:5" id="fnref:5">5</a></sup>'), "a footnote reference is a superscript link");
+  ok(fn.includes('<li id="fn:5"><p>The Sun, <a href="https://s">story</a>'), "the note is listed under its id, inline rendered");
+  ok(fn.includes("Second note that wraps."), "a wrapped note folds into itself");
+  ok(fn.indexOf("<div class=\"footnotes\">") > fn.indexOf("Another."), "notes come after the prose");
+  ok(!fn.includes("[^5]:"), "the definition lines are not left in the prose");
+}
+
 if (fails) { console.error(`\n${fails} FAILED`); process.exit(1); }
 console.log("\nall markdown-enough tests passed");

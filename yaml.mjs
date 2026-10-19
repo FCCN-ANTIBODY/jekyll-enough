@@ -77,10 +77,11 @@ export function parse(src) {
   const lines = raw.map((l) => (l.trim().startsWith("#") ? "" : stripComment(l)));
 
   let i = 0;
-  const nextContentIndent = (from) => {
-    for (let k = from; k < lines.length; k++) if (lines[k].trim() !== "") return indentOf(lines[k]);
+  const nextContentIndex = (from) => {
+    for (let k = from; k < lines.length; k++) if (lines[k].trim() !== "") return k;
     return -1;
   };
+  const nextContentIndent = (from) => { const k = nextContentIndex(from); return k < 0 ? -1 : indentOf(lines[k]); };
 
   // collect a block scalar: all following lines indented deeper than `parentIndent`, dedented + joined.
   function blockScalar(marker, parentIndent) {
@@ -148,7 +149,12 @@ export function parse(src) {
       i++;
       if (rest === "" ) {
         const childIndent = nextContentIndent(i);
+        const childAt = nextContentIndex(i);
         if (childIndent > indent) map[key] = node(childIndent);
+        // A block sequence may sit FLUSH with its key - `pieces:` then `- url: ...` at the same
+        // indent. YAML allows it and Ruby's to_yaml writes it, which is how every journal
+        // intermediate arrives. Read as an empty key it took every key after it with it.
+        else if (childIndent === indent && childAt >= 0 && /^-(\s|$)/.test(lines[childAt].trim())) map[key] = sequence(indent);
         else map[key] = null;                   // an empty key with no children
       } else if (/^[>|][+-]?$/.test(rest)) {
         map[key] = blockScalar(rest, indent);

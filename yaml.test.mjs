@@ -121,5 +121,17 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); fails++; } else co
      "the mount-scoped default that gives a cited piece its layout");
 }
 
+// flush-left block sequences, the shape Ruby's to_yaml writes and every journal intermediate carries.
+{
+  const a = parse("issue: 2026-10\nissues:\n- 2026-10\n- 2026-08\ntitle: after\n");
+  ok(JSON.stringify(a.issues) === JSON.stringify(["2026-10", "2026-08"]) && a.title === "after",
+     "a sequence flush with its key is read, and the keys after it survive");
+  const b = parse("pieces:\n- url: \"/journal/x/\"\n  title: One\n- url: \"/journal/y/\"\n  title: Two\ncut: '2026-10-18'\n");
+  ok(Array.isArray(b.pieces) && b.pieces.length === 2 && b.pieces[1].title === "Two" && b.cut === "2026-10-18",
+     "a flush sequence of maps, then the key after it");
+  const c = parse("empty:\nnext: 1\n");
+  ok(c.empty === null && c.next === 1, "an empty key followed by a key is still an empty key");
+}
+
 if (fails) { console.error(`\n${fails} FAILED`); process.exit(1); }
 console.log("\nall yaml-enough tests passed");
