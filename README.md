@@ -2,15 +2,14 @@
 
 **Enough of Jekyll to build a site, in a tab, with nothing installed.**
 
-Five modules, no dependencies, no build step, no Ruby:
+Four modules, no dependencies, no build step, no Ruby:
 
 | module | lines | what it is |
 |---|---:|---|
 | `liquid.mjs` | 430 | the template language — tags, filters, `include` and `include_relative` |
 | `build.mjs` | 210 | the pipeline: read a tree, render it, return `_site` |
 | `yaml.mjs` | 172 | front matter, `_config.yml`, `_data` — a deliberately dumb reader |
-| `markdown.mjs` | 150 | the markdown→HTML pass: headings, lists, quotes, tables, footnotes, raw HTML through |
-| `lazy.mjs` | 190 | one page of an unbuilt site over a fetch: the tree grows by what the build says it lacks |
+| `markdown.mjs` | 74 | the markdown→HTML pass |
 
 `buildSite` takes a **tree** — a plain `path → content` map — and returns one. It never touches a
 filesystem, which is what lets the same code run in a browser tab, in a service worker, or over a

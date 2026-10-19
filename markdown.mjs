@@ -1,14 +1,4 @@
-// jekyll-enough/markdown.mjs - MARKDOWN-ENOUGH: the markdown to HTML pass, the second half of rendering a
-// page (Liquid runs first, this runs on the resulting body). NOT CommonMark - what the civic pages and the
-// letters they carry actually use: ATX headings, paragraphs, inline (code / links / images / bold /
-// italic), fenced code, bullet and numbered lists (nested by indent), blockquotes, pipe tables, rules,
-// footnotes, and - crucially - RAW HTML BLOCKS PASS THROUGH VERBATIM (the <ul>/<div>/<script> that the
-// Liquid loops expand into). Kramdown's default is block-HTML passthrough; we keep that.
-//
-// ONE MODULE. This used to be a dumb core here plus a "README dialect" pre-pass in anecdote.channel's
-// press (markdown-more.mjs) that upgraded lists, quotes and tables to HTML in front of it. Two renderers
-// for one job meant the civic sites and the press read the same letter differently; now there is one.
-
+// markdown-enough: headings, paragraphs, inline, fences, lists, quotes, tables, rules, footnotes; raw HTML blocks pass through.
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const SEP = ""; // private-use sentinel: cannot occur in markdown source, so shielded spans never collide
 
@@ -85,11 +75,6 @@ export function render(src) {
       continue;
     }
 
-    // raw HTML block: a line that begins with '<' - pass the whole block through until a blank line.
-    // A RAW-TEXT element (script/style/pre/textarea) runs to its CLOSING TAG instead, blank lines and
-    // all - that's HTML's own parsing rule, and kramdown's passthrough honors it. Without this, a
-    // blank line inside an inline <script> (tell.anecdote.channel's landing) would seed a literal
-    // <p> into the script body and break the page's JS - caught by the real-Chromium chain test.
     if (lines[i].trimStart().startsWith("<")) {
       const raw = /^<(script|style|pre|textarea)\b/i.exec(lines[i].trimStart());
       const buf = [];

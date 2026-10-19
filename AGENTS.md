@@ -1,7 +1,7 @@
 # Working in this repository
 
 Small on purpose. Read `README.md` and then the module you are changing — there is no
-architecture to learn beyond five files that call each other in one direction.
+architecture to learn beyond four files that call each other in one direction.
 
 ## The rules most likely to be broken here
 
@@ -11,12 +11,9 @@ architecture to learn beyond five files that call each other in one direction.
 2. **`buildSite` takes a tree and returns a tree.** It must not read or write a filesystem. The
    caller owns I/O — that is what lets this run in a tab. A convenience wrapper that reads a
    directory belongs in the *caller*, not here.
-3. **Dumb on purpose, and ONE of each.** `yaml.mjs` is not a YAML implementation and
-   `markdown.mjs` is not CommonMark. They are *enough*: what the civic pages and the letters they
-   carry actually use. Widen one when a real page or a real letter needs it, never to chase a
-   spec. And never fix a gap by putting a second renderer in front of the first: there was one
-   (the press's `markdown-more`), two renderers read the same letter two ways, and it was folded
-   back in here.
+3. **Dumb on purpose.** `yaml.mjs` is not a YAML implementation and `markdown.mjs` is not
+   CommonMark. They are *enough*. Widening either to chase a spec is how a small thing becomes a
+   machine-sized thing wearing a small name.
 4. **Match real Jekyll where it is cheap, and say so where it is not.** The lenient posture —
    a missing include degrades to an HTML comment rather than failing the build — is deliberate.
    Do not make it strict without saying what breaks.
