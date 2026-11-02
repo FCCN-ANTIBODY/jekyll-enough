@@ -96,7 +96,8 @@ export function render(src) {
     const block = [];
     while (i < lines.length && !blank(lines[i]) && !special(lines[i])) block.push(lines[i++]);
 
-    if (block.every((l) => /^\s{0,3}>/.test(l))) {
+    // a quote's later lines may drop the > (lazy continuation, as kramdown reads it).
+    if (/^\s{0,3}>/.test(block[0])) {
       const inner = block.map((l) => l.replace(/^\s{0,3}>\s?/, "")).join("\n");
       out.push("<blockquote>" + render(inner).replace(/\n\s*\n/g, "\n") + "</blockquote>");
     } else if (ITEM.test(block[0]) && !RULE.test(block[0])) {
@@ -113,7 +114,9 @@ export function render(src) {
         else if (notes.length) notes[notes.length - 1].text += " " + l.trim();
       }
     } else {
-      out.push(`<p>${inline(block.join("\n"))}</p>`);
+      // a line ending in two spaces or two backslashes keeps its break, as kramdown does.
+      const text = block.map((l, n) => (n < block.length - 1 ? l.replace(/( {2,}|\\\\)$/, "\uE000") : l)).join("\n");
+      out.push(`<p>${inline(text).replace(/\uE000/g, "<br>")}</p>`);
     }
   }
   if (notes.length) {

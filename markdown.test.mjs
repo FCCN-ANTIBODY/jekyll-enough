@@ -23,6 +23,9 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); fails++; } else co
   ok(inline("**a** `b` [c](/d)") === '<strong>a</strong> <code>b</code> <a href="/d">c</a>', "mixed inline, no cross-talk");
   ok(inline("under_score_word stays") === "under_score_word stays", "intra-word underscores are not italic");
   ok(md("_Why would Fort\nCollins abandon it?_") === "<p><em>Why would Fort\nCollins abandon it?</em></p>", "italic wrapped across source lines");
+  ok(md("> one\ntwo\n\nthree") === "<blockquote><p>one\ntwo</p></blockquote>\n<p>three</p>", "a quote's later lines may drop the > (lazy continuation)");
+  ok(md("a. first  \nb. second\\\\\nc. third") === "<p>a. first<br>\nb. second<br>\nc. third</p>", "two trailing spaces or two backslashes keep a line break");
+  ok(md("one  \ntwo") === "<p>one<br>\ntwo</p>" && md("last  ") === "<p>last  </p>", "a break needs a following line");
   ok(inline("[a](/x/_b_/c) _d_") === '<a href="/x/_b_/c">a</a> <em>d</em>', "an underscore in a link's address is not italic");
 }
 
