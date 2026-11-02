@@ -16,12 +16,12 @@ export function inline(text) {
   // 2. images before links, since an image is a link with a bang in front.
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_, alt, src) => stash(`<img src="${src}" alt="${esc(alt)}">`));
   // 3. links - the text half may already contain a stashed code span.
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, href) => `<a href="${href}">${t}</a>`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, href) => `<a href="${stash(href)}">${t}</a>`);
   // 4. footnote references: [^5] -> a superscript link to the note (kramdown's ids).
   s = s.replace(/\[\^([^\]\s]+)\]/g, (_, id) => stash(`<sup class="footnote"><a href="#fn:${id}" id="fnref:${id}">${esc(id)}</a></sup>`));
   // 5. bold before italic so ** is not eaten by the single-* rule.
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>").replace(/(^|[^\w])_([^_\n]+)_(?=[^\w]|$)/g, "$1<em>$2</em>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, "$1<em>$2</em>");
   return s.replace(new RegExp(SEP + "(\\d+)" + SEP, "g"), (_, i) => holds[+i]);
 }
 
