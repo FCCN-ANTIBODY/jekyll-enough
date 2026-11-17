@@ -222,5 +222,36 @@ const ok = (c, m) => { if (!c) { console.error("FAIL: " + m); fails++; } else co
     "group_by keeps first-seen order, counts, and files a missing key under \"\"");
 }
 
+// case/when, and the modulo / remove_first / markdownify filters (fcpublicmedia.org's nav icons, opening
+// hours and tilt stack use them).
+{
+  const icon = "{%- case name -%}{%- when 'watch' -%}W{%- when 'learn', 'join' -%}LJ{%- when 'meet' or 'reserve' -%}MR{%- else -%}?{%- endcase -%}";
+  ok(render(icon, { name: "watch" }) === "W", "case: a when matches by ==");
+  ok(render(icon, { name: "join" }) === "LJ" && render(icon, { name: "reserve" }) === "MR", "case: a when lists values with , or `or`");
+  ok(render(icon, { name: "x" }) === "?", "case: else when nothing matches");
+  ok(render("{% case n %}dropped{% when 1 %}one{% endcase %}", { n: 2 }) === "", "case: no else, no match, and text before the first when are empty");
+  ok(render("{% case n %}{% when 1 %}{% for i in xs %}{{ i }}{% endfor %}{% endcase %}", { n: 1, xs: [1, 2] }) === "12", "case: a when body holds other blocks");
+  ok(render("{{ 13 | modulo: 12 }}") === "1" && render("{{ -1 | modulo: 12 }}") === "11", "modulo, with Ruby's sign");
+  ok(render("{{ t | modulo: 12 }}", { t: "14:30" }) === "2" && render("{{ 'x' | modulo: 12 }}") === "0",
+    "modulo reads a string as Liquid's to_number does");
+  ok(render("{% for kv in m %}{{ kv[0] }}={{ kv[1] }};{% endfor %}", { m: { info: "i@x", legal: "l@x" } }) === "info=i@x;legal=l@x;",
+    "a hash iterates as [key, value] pairs");
+  ok(render("{% if s[0] %}indexed{% else %}nil{% endif %}{{ s.first }}", { s: "By appointment" }) === "nilB",
+    "a string has no [index] (nil, as in Liquid), but .first still works");
+  const c = { url: "/meet/", menu: ["Watch", "Meet"], h: { a: 1 } };
+  ok(evalCond("url contains '/meet/'", c) && !evalCond("url contains '/learn/'", c), "contains: a substring");
+  ok(evalCond("menu contains 'Meet'", c) && !evalCond("menu contains 'Join'", c), "contains: an array member");
+  ok(evalCond("h contains 'a'", c) && !evalCond("nope contains 'a'", c), "contains: a hash key; nil contains nothing");
+  ok(evalCond("menu contains 'Meet' and url contains 'meet'", c), "contains under and");
+  const xs = { xs: [1, 2, 3, 4, 5], n: 2 };
+  ok(render("{% for i in xs limit: 3 %}{{ i }}{% endfor %}", xs) === "123", "for: limit");
+  ok(render("{% for i in xs offset: 1 limit: n %}{{ i }}{% endfor %}", xs) === "23", "for: offset, and a limit by variable");
+  ok(render("{% for i in xs limit: 2 reversed %}{{ i }}{% endfor %}", xs) === "21", "for: reversed after the slice, as Liquid");
+  ok(render("{% for i in xs limit: 2 %}{{ forloop.length }}{% endfor %}", xs) === "22", "for: forloop counts the slice");
+  ok(render("{{ 'membership:student:membership:' | remove_first: 'membership:' }}") === "student:membership:", "remove_first removes only the first");
+  ok(render("{{ b | markdownify }}", { b: "a *b*" }).includes("<em>b</em>"), "markdownify renders markdown");
+  ok(render("{{ nope | markdownify }}") === "", "markdownify of nil is empty");
+}
+
 if (fails) { console.error(`\n${fails} FAILED`); process.exit(1); }
 console.log("\nall liquid-enough tests passed");

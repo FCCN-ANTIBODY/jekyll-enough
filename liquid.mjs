@@ -9,9 +9,10 @@
 // Supported, and no more:
 //   {{ a.b.c | filter: arg, arg }}         output an expression through a filter chain
 //   {{ a[b].c }} / {{ a["k"] }} / {{ a[0] }}   bracket lookup (a variable, quoted key, or index)
-//   {% if EXPR %}…{% elsif %}…{% else %}…{% endif %}   truthiness + == / != / < / > , and / or
+//   {% if EXPR %}…{% elsif %}…{% else %}…{% endif %}   truthiness + == / != / < / > / contains, and / or
 //   {% unless EXPR %}…{% else %}…{% endunless %}
-//   {% for x in COLL %}…{% else %}…{% endfor %}        (forloop.*, {% continue %}, {% break %})
+//   {% case EXPR %}{% when V, V or V %}…{% else %}…{% endcase %}   the first matching when, by ==
+//   {% for x in COLL limit: N offset: N reversed %}…{% else %}…{% endfor %}   (forloop.*, {% continue %}, {% break %})
 //   {% assign name = EXPR %}               bind a variable (template-scoped: survives loop bodies)
 //   {% capture name %}…{% endcapture %}    render a fragment now, bind it to a name for reuse
 //   {% include NAME k=v … %} / {% include {{ EXPR }} k=v … %} / {% include_relative PATH %}
@@ -19,7 +20,7 @@
 //   {%- -%} / {{- -}}                      whitespace trim on either side
 // Filters: relative_url, absolute_url, default, where, where_exp, jsonify, size, upcase, downcase,
 //   first, last, join, split, append, replace, map, uniq, sort, reverse, plus, divided_by, ceil,
-//   strip_html, number_of_words, slugify, date, date_to_xmlschema.
+//   strip_html, number_of_words, slugify, date, date_to_xmlschema, modulo, remove_first, markdownify.
 // Values: 'str' / "str" / number / true / false / nil / empty, and variable paths (dots + brackets).
 //
 // Failure posture (the enough-client rule): strict by default — an unknown tag/filter or a missing
@@ -29,6 +30,8 @@
 //
 // Named divergences from real Liquid/Jekyll (deliberate): dates format in UTC (Jekyll uses the site
 // timezone); an include's assigns do not leak back into the caller; uniq compares primitives only.
+
+import { render as renderMarkdown } from "./markdown.mjs";
 
 // ---- tokenize --------------------------------------------------------------------------------------
 // Split into text / {{ output }} / {% tag %}, capturing the `-` trim markers so we can strip whitespace.
@@ -62,7 +65,7 @@ function tokenize(src) {
 }
 
 // ---- parse -----------------------------------------------------------------------------------------
-// A flat token list → a node tree. Block tags (if/unless/for/capture) open a frame; their end tags close
+// A flat token list → a node tree. Block tags (if/unless/case/for/capture) open a frame; their end tags close
 // it. `opts.lenient` turns an unknown tag into a {gap} node instead of a throw.
 function parse(toks, opts = {}) {
   let pos = 0;
@@ -90,6 +93,19 @@ function parse(toks, opts = {}) {
         if (toks[pos] && toks[pos].v.split(/\s+/)[0] === "else") { pos++; els = block(["endunless"]); }
         expect("endunless");
         nodes.push({ n: "unless", cond: tk.v.slice(6).trim(), body, els });
+      } else if (head === "case") {
+        // Text between {% case %} and the first {% when %} is dropped, as Liquid does.
+        block(["when", "else", "endcase"]);
+        const whens = [];
+        let els = null;
+        while (toks[pos] && ["when", "else"].includes(toks[pos].v.split(/\s+/)[0])) {
+          const w = toks[pos]; pos++;
+          if (w.v.split(/\s+/)[0] === "else") { els = block(["endcase"]); break; }
+          const vals = splitTop(w.v.slice(4).trim(), ",").flatMap((x) => splitTop(x, " or ")).map((x) => x.trim()).filter(Boolean);
+          whens.push({ vals, body: block(["when", "else", "endcase"]) });
+        }
+        expect("endcase");
+        nodes.push({ n: "case", expr: tk.v.slice(4).trim(), whens, els });
       } else if (head === "for") {
         const mm = /^for\s+(\w+)\s+in\s+(.+)$/.exec(tk.v);
         if (!mm) throw new Error("liquid-enough: bad for: " + tk.v);
@@ -97,7 +113,13 @@ function parse(toks, opts = {}) {
         let empty = null;
         if (toks[pos] && toks[pos].v.split(/\s+/)[0] === "else") { pos++; empty = block(["endfor"]); }
         expect("endfor");
-        nodes.push({ n: "for", name: mm[1], expr: mm[2].trim(), body, empty });
+        // Its parameters, peeled off the end: limit: N, offset: N, reversed (N a number or a variable).
+        let expr = mm[2].trim(), limit = null, offset = null, reversed = false, x;
+        while ((x = /\s+reversed$/.exec(expr) || /\s+(limit|offset)\s*:\s*(\S+)$/.exec(expr))) {
+          if (!x[1]) reversed = true; else if (x[1] === "limit") limit = x[2]; else offset = x[2];
+          expr = expr.slice(0, x.index);
+        }
+        nodes.push({ n: "for", name: mm[1], expr, limit, offset, reversed, body, empty });
       } else if (head === "assign") {
         const mm = /^assign\s+(\w+)\s*=\s*(.+)$/s.exec(tk.v);
         if (!mm) throw new Error("liquid-enough: bad assign: " + tk.v);
@@ -186,7 +208,8 @@ function lookup(path, ctx) {
     if (cur == null) return null;
     if (typeof seg === "object") {                    // [EXPR] — a literal or a variable, resolved here
       const key = lookup(seg.bracket, ctx);
-      cur = key == null ? null : cur[key];
+      // A string has no [index] in Liquid ("abc"[0] is nil): .first is how a template gets its first letter.
+      cur = key == null || typeof cur === "string" ? null : cur[key];
       continue;
     }
     // Liquid pseudo-properties: .size / .first / .last on arrays & strings (and .size on hashes).
@@ -271,6 +294,15 @@ function strftime(d, fmt) {
   });
 }
 
+// Liquid's to_number: a number stays one; a string is a decimal ("1.5") or Ruby's to_i, the leading integer or 0.
+function toNumber(v) {
+  if (typeof v === "number") return v;
+  const s = String(v ?? "").trim();
+  if (/^-?\d+\.\d+$/.test(s)) return Number(s);
+  const m = /^[+-]?\d+/.exec(s);
+  return m ? Number(m[0]) : 0;
+}
+
 const FILTERS = {
   relative_url: (v, _a, ctx) => joinUrl(ctx.site?.baseurl || "", v),
   absolute_url: (v, _a, ctx) => joinUrl(ctx.site?.url || "", joinUrl(ctx.site?.baseurl || "", v)),
@@ -333,6 +365,12 @@ const FILTERS = {
   // which is what makes `{% assign list = list | push: x %}` safe inside a loop.
   push: (v, [item]) => [...(Array.isArray(v) ? v : []), item],
   times: (v, [n]) => Number(v) * Number(n),
+  // modulo is Ruby's: the result takes the divisor's sign (-1 | modulo: 12 is 11), unlike JS's %, and a string
+  // counts as Liquid's to_number reads it ("14:30" is 14, "x" is 0), not NaN.
+  modulo: (v, [n]) => { const a = toNumber(v), b = toNumber(n); return ((a % b) + b) % b; },
+  remove_first: (v, [s]) => { const t = String(v ?? ""), i = t.indexOf(String(s ?? "")); return i < 0 ? t : t.slice(0, i) + t.slice(i + String(s ?? "").length); },
+  // markdownify goes through markdown.mjs, the same pass a .md page gets; Jekyll ends it with a newline.
+  markdownify: (v) => v == null ? "" : renderMarkdown(String(v)) + "\n",
   // round: Ruby rounds half away from zero; Math.round rounds half up. They differ only on negative
   // halves (-2.5), which no civic template has been seen to produce.
   round: (v, [digits]) => { const x = Number(v), d = Number(digits ?? 0); return d > 0 ? Number(x.toFixed(d)) : Math.round(x); },
@@ -387,6 +425,14 @@ function evalCond(expr, ctx) {
   if (ors.length > 1) return ors.some((o) => evalCond(o.trim(), ctx));
   const ands = splitTop(expr, " and ");
   if (ands.length > 1) return ands.every((a) => evalCond(a.trim(), ctx));
+  // `contains`: a substring of a string, or a member of an array (Liquid's; on a hash it asks for a key).
+  const has = /^(.+?)\s+contains\s+(.+)$/.exec(expr);
+  if (has) {
+    const a = lookup(has[1].trim(), ctx), b = lookup(has[2].trim(), ctx);
+    if (typeof a === "string") return b != null && a.includes(String(b));
+    if (Array.isArray(a)) return a.some((x) => x == b);
+    return a != null && typeof a === "object" && b != null && Object.prototype.hasOwnProperty.call(a, b);
+  }
   const cmp = /^(.+?)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(expr);
   if (cmp) {
     const a = lookup(cmp[1].trim(), ctx), b = lookup(cmp[3].trim(), ctx);
@@ -421,11 +467,20 @@ function renderNodes(nodes, ctx, opts, st) {
       }
     } else if (nd.n === "unless") {
       out += renderNodes(evalCond(nd.cond, ctx) ? (nd.els || []) : nd.body, ctx, opts, st);
+    } else if (nd.n === "case") {
+      const v = evalValue(nd.expr, ctx, opts);
+      const hit = nd.whens.find((w) => w.vals.some((x) => lookup(x, ctx) == v));
+      out += renderNodes(hit ? hit.body : (nd.els || []), ctx, opts, st);
     } else if (nd.n === "continue" || nd.n === "break") {
       st.flow.sig = nd.n;                          // bubbles up; the nearest for-loop consumes it
     } else if (nd.n === "for") {
       const coll = evalValue(nd.expr, ctx, opts);
-      const arr = Array.isArray(coll) ? coll : (coll && typeof coll === "object" ? Object.values(coll) : []);
+      // A hash iterates as [key, value] pairs, as in Liquid: {% for kv in site.email %}{{ kv[0] }}…{{ kv[1] }}.
+      let arr = Array.isArray(coll) ? coll : (coll && typeof coll === "object" ? Object.entries(coll) : []);
+      // Liquid slices (offset, then limit) and only then reverses.
+      const from = nd.offset == null ? 0 : Math.max(0, toNumber(lookup(nd.offset, ctx)));
+      arr = arr.slice(from, nd.limit == null ? undefined : from + Math.max(0, toNumber(lookup(nd.limit, ctx))));
+      if (nd.reversed) arr = [...arr].reverse();
       if (!arr.length && nd.empty) { out += renderNodes(nd.empty, ctx, opts, st); continue; }
       for (let idx = 0; idx < arr.length; idx++) {
         const scope = Object.create(ctx);          // child scope: loop var + forloop, parent visible
