@@ -1,1 +1,26 @@
-no draft yet - replace this file: line 1 becomes the PR title, the rest the body
+# liquid: what fcpublicmedia.org's site needs to build as Jekyll would
+
+fcpublicmedia.org's workshed preview builds the site with jekyll-enough, on a bay with no Ruby. Compared
+page by page with the live (real Jekyll) site, these made the preview wrong:
+
+- `{% case %}{% when a, b or c %}…{% else %}…{% endcase %}` (nav icons): the first matching when, by `==`;
+  text before the first when is dropped, as Liquid does.
+- `contains` in conditions (the header's current-page mark, folded menu items): substring, array member,
+  hash key. Before, it was read as a variable name and was silently false, with no gap reported.
+- `for` parameters `limit:`, `offset:`, `reversed` (the watch page's "Recently aired"). Before,
+  `cc.recent limit: 12` was looked up as one name and the loop was silently empty. Sliced, then reversed,
+  as Liquid does.
+- A hash iterates as `[key, value]` pairs, as in Liquid (the footer's emails). Before, values only.
+  **This changes output** for any template that relied on values-only, which real Jekyll never gave.
+- A string has no `[index]` (`"abc"[0]` is nil in Liquid; `.first` still works). Before, it gave the letter.
+- Filters `modulo` (Ruby's sign; strings read as Liquid's to_number, so `"14:30" | modulo: 12` is 2),
+  `remove_first`, `markdownify` (through markdown.mjs; liquid.mjs now imports it, a sibling module).
+
+Tags and filters are only added, so NCCV/platform's transcribed lists in check-render-compat.mjs still
+hold; they can add these when they want them. The hash-iteration and string-index changes are the two
+behaviour changes worth a look there.
+
+Still different from real Jekyll, and left alone: headings get no `id` (kramdown's auto ids), no smart
+quotes, `markdown="1"` is passed through, dates in UTC (already named in liquid.mjs).
+
+`node test.mjs`: 6/6.
